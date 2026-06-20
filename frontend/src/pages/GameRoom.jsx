@@ -4,6 +4,7 @@ import { ArrowLeft, MessageSquare, Send } from 'lucide-react';
 import { io } from 'socket.io-client';
 import LudoBoard from '../components/LudoBoard';
 import BingoBoard from '../components/BingoBoard';
+import Dice from '../components/Dice';
 
 const COLOR_LABEL = { red: 'Mavi', green: 'Sarı', yellow: 'Yeşil', blue: 'Turuncu' };
 const COLOR_HEX   = { red: '#0ea5e9', green: '#eab308', yellow: '#16a34a', blue: '#ea580c' };
@@ -15,6 +16,7 @@ export default function GameRoom({ user }) {
   const [room, setRoom]         = useState(null);
   const [messages, setMessages] = useState([]);
   const [newMsg, setNewMsg]     = useState('');
+  const [rolling, setRolling]   = useState(false);
   const socketRef = useRef(null);
   const msgEndRef = useRef(null);
 
@@ -37,6 +39,14 @@ export default function GameRoom({ user }) {
   }, [messages]);
 
   const emit = (event, data) => socketRef.current?.emit(event, data);
+
+  const handleRoll = () => {
+    if (!canRoll || rolling) return;
+    setRolling(true);
+    emit('roll_dice', { roomId, user });
+    // Animasyon süresi kadar bekle
+    setTimeout(() => setRolling(false), 800);
+  };
 
   const handleSend = (e) => {
     e.preventDefault();
@@ -169,23 +179,28 @@ export default function GameRoom({ user }) {
                       Zar: <strong>{gs.lastDice}</strong>
                     </div>
                   )}
-                  {/* Sadece aktif oyuncuya göster */}
-                  {isMyTurn && !winner && (
-                    <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
-                      <button
-                        onClick={() => emit('roll_dice', { roomId, user })}
-                        disabled={!canRoll}
-                        style={{ padding: '10px 24px', fontSize: '15px', opacity: canRoll ? 1 : 0.5 }}
-                      >
-                        🎲 Zar At
-                      </button>
-                      {gs.lastDice > 0 && gs.movablePawns?.length === 0 && (
-                        <span style={{ color: 'var(--text-secondary)', alignSelf: 'center', fontSize: '13px' }}>
-                          ⏳ Sıra geçiyor…
-                        </span>
-                      )}
-                    </div>
+              {/* Sadece aktif oyuncuya göster */}
+              {isMyTurn && !winner && (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+                  <Dice
+                    value={gs.lastDice || null}
+                    rolling={rolling}
+                    disabled={!canRoll}
+                    onRoll={handleRoll}
+                  />
+                  {gs.lastDice > 0 && gs.movablePawns?.length === 0 && (
+                    <span style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>
+                      ⏳ Sıra geçiyor…
+                    </span>
                   )}
+                </div>
+              )}
+              {/* Sırası olmayan oyunculara sadece zarı göster */}
+              {!isMyTurn && gs.lastDice > 0 && (
+                <div style={{ opacity: 0.7 }}>
+                  <Dice value={gs.lastDice} rolling={false} disabled={true} onRoll={() => {}} />
+                </div>
+              )}
                 </div>
               )}
 
