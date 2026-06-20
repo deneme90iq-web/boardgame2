@@ -42,6 +42,7 @@ io.on('connection', (socket) => {
       id: roomId,
       name,
       gameType,
+      status: 'waiting', // Lobi durumu
       players: [{ ...user, color: 'red' }], // İlk oyuncu Kırmızı
       maxPlayers: gameType === 'ludo' ? 4 : maxPlayers,
       creatorId: user.id,
@@ -73,10 +74,12 @@ io.on('connection', (socket) => {
 
   socket.on('join_room', ({ roomId, user }) => {
     const room = rooms[roomId];
-    if (room && room.players.length < room.maxPlayers) {
+    if (room && room.players.length < room.maxPlayers && room.status === 'waiting') {
       if (!room.players.find(p => p.id === user.id)) {
         const colors = ['red', 'green', 'yellow', 'blue'];
-        const assignedColor = colors[room.players.length];
+        const usedColors = room.players.map(p => p.color);
+        const availableColors = colors.filter(c => !usedColors.includes(c));
+        const assignedColor = availableColors.length > 0 ? availableColors[0] : null;
         room.players.push({ ...user, color: assignedColor });
       }
       socket.join(roomId);
@@ -85,6 +88,34 @@ io.on('connection', (socket) => {
       console.log(`Kullanıcı ${user.username} odaya katıldı: ${roomId}`);
     } else if (!room) {
       socket.join(roomId);
+    }
+  });
+
+  // Lobi: Renk Seçimi
+  socket.on('select_color', ({ roomId, user, color }) => {
+    const room = rooms[roomId];
+    if (room && room.status === 'waiting') {
+      const isTaken = room.players.some(p => p.color === color && p.id !== user.id);
+      if (!isTaken) {
+        const playerIndex = room.players.findIndex(p => p.id === user.id);
+        if (playerIndex !== -1) {
+          room.players[playerIndex].color = color;
+          io.to(roomId).emit('room_state_update', room);
+        }
+      }
+    }
+  });
+
+  // Lobi: Oyunu Başlat
+  socket.on('start_game', ({ roomId, user }) => {
+    const room = rooms[roomId];
+    if (room && room.creatorId === user.id && room.status === 'waiting' && room.players.length >= 2) {
+      room.status = 'playing';
+      if (room.gameType === 'ludo') {
+        room.gameState.turn = room.players[0].color; // Oyunu başlatan (veya ilk kişi) sırayı alır
+      }
+      io.to(roomId).emit('room_state_update', room);
+      io.emit('rooms_list', Object.values(rooms)); // Odadakilerin oyun içinde olduğunu lobiye yansıtmak isterseniz
     }
   });
 
@@ -137,12 +168,11 @@ io.on('connection', (socket) => {
         room.gameState.lastDice = 0; // Zarı sıfırla
 
         // Turn değiştir (Eğer 6 atılmadıysa)
-        // Basitlik için turn değiştirme mantığını burada yapalım, zar atıldığında kaydedilen lastDice'a bakarak
-        // Şimdilik sırayı direkt sonraki oyuncuya geçiriyoruz
-        const colors = ['red', 'green', 'yellow', 'blue'];
-        const currentColorIdx = colors.indexOf(player.color);
-        let nextColorIdx = (currentColorIdx + 1) % room.players.length;
-        room.gameState.turn = colors[nextColorIdx];
+        if (dice !== 6) {
+          const currentIndex = room.players.findIndex(p => p.color === player.color);
+          let nextIndex = (currentIndex + 1) % room.players.length;
+          room.gameState.turn = room.players[nextIndex].color;
+        }
 
         io.to(roomId).emit('room_state_update', room);
       }
@@ -154,10 +184,9 @@ io.on('connection', (socket) => {
     if (room && room.gameType === 'ludo') {
       const player = room.players.find(p => p.id === user.id);
       if (player && room.gameState.turn === player.color) {
-        const colors = ['red', 'green', 'yellow', 'blue'];
-        const currentColorIdx = colors.indexOf(player.color);
-        let nextColorIdx = (currentColorIdx + 1) % room.players.length;
-        room.gameState.turn = colors[nextColorIdx];
+        const currentIndex = room.players.findIndex(p => p.color === player.color);
+        let nextIndex = (currentIndex + 1) % room.players.length;
+        room.gameState.turn = room.players[nextIndex].color;
         room.gameState.lastDice = 0;
         io.to(roomId).emit('room_state_update', room);
       }
