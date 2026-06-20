@@ -60,37 +60,10 @@ export default function GameRoom({ user }) {
     if (!room || room.gameType !== 'ludo') return;
     
     const player = room.players.find(p => p.id === user.id);
-    if (!player || player.color !== color) {
-      // Sadece kendi piyonuna tıklayabilir
-      return;
-    }
+    if (!player || player.color !== color) return; // Sadece kendi piyonuna tıklayabilir
+    if (room.gameState.turn !== color || room.gameState.lastDice === 0) return; // Sıra onda değil veya zar atmamış
 
-    if (room.gameState.turn !== color || room.gameState.lastDice === 0) {
-      // Sıra onda değil veya zar atmamış
-      return;
-    }
-
-    const pos = room.gameState.pawns[color][pawnIndex];
-    const dice = room.gameState.lastDice;
-    let newPos = pos;
-
-    if (pos === -1) {
-      if (dice === 6) newPos = 0;
-      else return; // 6 atmadan çıkamaz
-    } else if (pos >= 0 && pos <= 50) {
-      newPos = pos + dice;
-      if (newPos > 50) {
-        const overshoot = newPos - 51;
-        newPos = 100 + overshoot;
-      }
-    } else if (pos >= 100) {
-      newPos = pos + dice;
-      if (newPos > 105) return; // Bitişi geçemez
-    } else {
-      return; // Zaten bitmiş
-    }
-
-    socket.emit('move_pawn', { roomId, user, pawnIndex, newPos });
+    socket.emit('move_pawn', { roomId, user, pawnIndex });
   };
 
   const handleRollDice = () => {
@@ -134,28 +107,36 @@ export default function GameRoom({ user }) {
                 <p>Oyuncuların katılması ve renk seçmesi bekleniyor...</p>
                 
                 <div style={{ margin: '30px 0', display: 'flex', justifyContent: 'center', gap: '20px' }}>
-                  {['red', 'green', 'yellow', 'blue'].map(c => {
+                 {['red', 'green', 'yellow', 'blue'].map(c => {
                     const playerWithColor = room.players.find(p => p.color === c);
                     const isTaken = !!playerWithColor;
                     const isMyColor = playerWithColor?.id === user.id;
+                    const colorLabels = { red: 'Kırmızı', green: 'Yeşil', yellow: 'Sarı', blue: 'Mavi' };
                     const colorCodes = { red: '#ef4444', green: '#10b981', yellow: '#eab308', blue: '#3b82f6' };
                     
                     return (
                       <div key={c} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
                         <button
-                          onClick={() => { if (!isTaken) socket.emit('select_color', { roomId, user, color: c }) }}
-                          disabled={isTaken && !isMyColor}
-                          style={{
-                            width: '60px', height: '60px', borderRadius: '50%',
-                            backgroundColor: colorCodes[c],
-                            border: isMyColor ? '4px solid white' : '2px solid transparent',
-                            opacity: isTaken && !isMyColor ? 0.3 : 1,
-                            cursor: isTaken && !isMyColor ? 'not-allowed' : 'pointer',
-                            boxShadow: isMyColor ? '0 0 15px rgba(255,255,255,0.5)' : 'none'
+                          onClick={() => {
+                            // Eğer bu renk başkasındaysa tıklanamaz
+                            if (isTaken && !isMyColor) return;
+                            // Eğer bu benim rengimse veya boşsa seç
+                            socket.emit('select_color', { roomId, user, color: c });
                           }}
+                          style={{
+                            width: '64px', height: '64px', borderRadius: '50%',
+                            backgroundColor: colorCodes[c],
+                            border: isMyColor ? '4px solid white' : isTaken ? '2px solid #666' : '2px solid transparent',
+                            opacity: isTaken && !isMyColor ? 0.35 : 1,
+                            cursor: isTaken && !isMyColor ? 'not-allowed' : 'pointer',
+                            boxShadow: isMyColor ? `0 0 20px ${colorCodes[c]}, 0 0 6px rgba(255,255,255,0.5)` : 'none',
+                            transform: isMyColor ? 'scale(1.15)' : 'scale(1)',
+                            transition: 'all 0.2s'
+                          }}
+                          title={isTaken && !isMyColor ? `${playerWithColor.username} seçti` : `${colorLabels[c]} seç`}
                         />
-                        <span style={{ fontSize: '12px', fontWeight: isMyColor ? 'bold' : 'normal' }}>
-                          {isTaken ? playerWithColor.username : 'Boş'}
+                        <span style={{ fontSize: '12px', fontWeight: isMyColor ? 'bold' : 'normal', color: isMyColor ? colorCodes[c] : 'var(--text-secondary)' }}>
+                          {isTaken ? `${playerWithColor.username}${isMyColor ? ' (Sen)' : ''}` : colorLabels[c]}
                         </span>
                       </div>
                     );
@@ -183,26 +164,38 @@ export default function GameRoom({ user }) {
               <>
                 {gameType === 'ludo' && room && room.gameState && (
                   <div style={{ marginBottom: '20px', textAlign: 'center', width: '100%' }}>
+                    {/* Kimin sırası */}
                     <h3 style={{ margin: '0 0 10px 0', color: room.gameState.turn === 'red' ? '#ef4444' : room.gameState.turn === 'green' ? '#10b981' : room.gameState.turn === 'yellow' ? '#eab308' : '#3b82f6' }}>
                       Sıra: {room.gameState.turn === 'red' ? 'Kırmızı' : room.gameState.turn === 'green' ? 'Yeşil' : room.gameState.turn === 'yellow' ? 'Sarı' : 'Mavi'}
+                      {room.gameState.turn === playerColor ? ' (Sen)' : ''}
                     </h3>
+                    
                     {room.gameState.lastDice > 0 && (
                       <div style={{ fontSize: '18px', marginBottom: '10px' }}>
                         Atılan Zar: <strong>{room.gameState.lastDice}</strong>
                       </div>
                     )}
                     
-                    <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', marginBottom: '20px' }}>
-                      <button onClick={handleRollDice} disabled={room.gameState.turn !== playerColor || room.gameState.lastDice > 0}>
-                        Zar At
-                      </button>
-                      <button 
-                        onClick={() => { if (socket) socket.emit('pass_turn', { roomId, user }) }} 
-                        disabled={room.gameState.turn !== playerColor || room.gameState.lastDice === 0} 
-                        style={{ background: 'rgba(255,255,255,0.1)', color: 'white' }}>
-                        Pas Geç
-                      </button>
-                    </div>
+                    {/* Sadece sırası gelen kişinin ekranında Zar At ve Pas Geç görünür */}
+                    {room.gameState.turn === playerColor && (
+                      <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', marginBottom: '20px' }}>
+                        <button 
+                          onClick={handleRollDice} 
+                          disabled={room.gameState.lastDice > 0}
+                          style={{ padding: '10px 24px', fontSize: '16px' }}
+                        >
+                          🎲 Zar At
+                        </button>
+                        {room.gameState.lastDice > 0 && (
+                          <button 
+                            onClick={() => { if (socket) socket.emit('pass_turn', { roomId, user }) }} 
+                            style={{ background: 'rgba(255,255,255,0.1)', color: 'white', padding: '10px 16px' }}
+                          >
+                            Pas Geç
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
                 

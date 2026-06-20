@@ -129,52 +129,99 @@ io.on('connection', (socket) => {
     const room = rooms[roomId];
     if (room && room.gameType === 'ludo') {
       const player = room.players.find(p => p.id === user.id);
-      if (player && room.gameState.turn === player.color) {
+      if (player && room.gameState.turn === player.color && room.gameState.lastDice === 0) {
         const dice = Math.floor(Math.random() * 6) + 1;
         room.gameState.lastDice = dice;
         io.to(roomId).emit('dice_rolled', { user, dice });
         io.to(roomId).emit('receive_message', { user: 'Sistem', text: `${user.username} zarı attı: ${dice}` });
-        io.to(roomId).emit('room_state_update', room);
         
-        // Hamle yapma mantığı client tarafında değerlendirilip move_pawn çağrılacak.
-        // Eğer hiçbir hamle yapılamıyorsa turn geçmeli (bunu basitlik adına frontend'den tetikleyeceğiz)
+        // Hamle yapılamayacak durumdaysa (ör: kalede ve 6 değil, başka piyon yok)
+        // Basitlik adına oyuncu "Pas Geç" tuşunu kullanabilir.
+        io.to(roomId).emit('room_state_update', room);
       }
     }
   });
 
-  socket.on('move_pawn', ({ roomId, user, pawnIndex, newPos }) => {
+  const SAFE_ZONES = [0, 8, 13, 21, 26, 34, 39, 47]; // Yıldızlı ve başlangıç alanları (Mutlak koordinatlar 0-51)
+  const START_INDEX = { red: 0, green: 13, yellow: 26, blue: 39 };
+
+  socket.on('move_pawn', ({ roomId, user, pawnIndex }) => {
     const room = rooms[roomId];
     if (room && room.gameType === 'ludo') {
       const player = room.players.find(p => p.id === user.id);
-      if (player && room.gameState.turn === player.color) {
-        
-        // Piyon yeme kontrolü
-        if (newPos >= 0 && newPos <= 51) {
-          Object.keys(room.gameState.pawns).forEach(color => {
-            if (color !== player.color) {
-              room.gameState.pawns[color].forEach((pos, idx) => {
-                if (pos === newPos) {
-                  // Yendi, kaleye gönder
-                  room.gameState.pawns[color][idx] = -1;
-                  io.to(roomId).emit('receive_message', { user: 'Sistem', text: `${player.username}, ${color} piyonunu kırdı!` });
-                }
-              });
-            }
-          });
+      const dice = room.gameState.lastDice;
+
+      if (player && room.gameState.turn === player.color && dice > 0) {
+        let pos = room.gameState.pawns[player.color][pawnIndex];
+        let newPos = pos;
+        let moveValid = false;
+
+        // Hamleyi kurallara göre hesapla
+        if (pos === -1) {
+          if (dice === 6) {
+            newPos = 0; // Yolun başlangıcına çık
+            moveValid = true;
+          }
+        } else if (pos >= 0 && pos <= 50) {
+          newPos = pos + dice;
+          if (newPos > 50) {
+            // Home bölgesine giriş
+            const overshoot = newPos - 51;
+            newPos = 100 + overshoot;
+          }
+          moveValid = true;
+        } else if (pos >= 100) {
+          newPos = pos + dice;
+          if (newPos <= 105) {
+            moveValid = true; // Tam isabetle veya ilerleyerek
+          }
         }
 
-        // Piyonun pozisyonunu güncelle
-        room.gameState.pawns[player.color][pawnIndex] = newPos;
-        room.gameState.lastDice = 0; // Zarı sıfırla
+        if (moveValid) {
+          // Mutlak pozisyonu hesapla (sadece normal yol için)
+          let newAbsolutePos = -1;
+          if (newPos >= 0 && newPos <= 51) {
+            newAbsolutePos = (START_INDEX[player.color] + newPos) % 52;
+          }
 
-        // Turn değiştir (Eğer 6 atılmadıysa)
-        if (dice !== 6) {
-          const currentIndex = room.players.findIndex(p => p.color === player.color);
-          let nextIndex = (currentIndex + 1) % room.players.length;
-          room.gameState.turn = room.players[nextIndex].color;
+          // Piyon kırma kontrolü (Güvenli bölge değilse ve normal yoldaysa)
+          if (newAbsolutePos !== -1 && !SAFE_ZONES.includes(newAbsolutePos)) {
+            Object.keys(room.gameState.pawns).forEach(color => {
+              if (color !== player.color) {
+                room.gameState.pawns[color].forEach((otherPos, otherIdx) => {
+                  if (otherPos >= 0 && otherPos <= 51) {
+                    let otherAbsolutePos = (START_INDEX[color] + otherPos) % 52;
+                    if (otherAbsolutePos === newAbsolutePos) {
+                      // Kırıldı!
+                      room.gameState.pawns[color][otherIdx] = -1;
+                      io.to(roomId).emit('receive_message', { user: 'Sistem', text: `${player.username}, ${color} piyonunu kırdı!` });
+                    }
+                  }
+                });
+              }
+            });
+          }
+
+          // Pozisyonu güncelle
+          room.gameState.pawns[player.color][pawnIndex] = newPos;
+          room.gameState.lastDice = 0;
+
+          // 6 atan veya kırma yapan tekrar atar kuralı (şimdi sadece 6 atana hak verelim)
+          if (dice !== 6) {
+            const currentIndex = room.players.findIndex(p => p.color === player.color);
+            let nextIndex = (currentIndex + 1) % room.players.length;
+            room.gameState.turn = room.players[nextIndex].color;
+          }
+
+          // Oyun bitti mi kontrolü
+          const hasWon = room.gameState.pawns[player.color].every(p => p === 105);
+          if (hasWon) {
+             io.to(roomId).emit('receive_message', { user: 'Sistem', text: `🎉 ${player.username} OYUNU KAZANDI! 🎉` });
+             room.status = 'waiting'; // Oyunu lobiye döndür
+          }
+
+          io.to(roomId).emit('room_state_update', room);
         }
-
-        io.to(roomId).emit('room_state_update', room);
       }
     }
   });
