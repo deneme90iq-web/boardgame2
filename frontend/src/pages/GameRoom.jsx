@@ -1,6 +1,6 @@
 import { useParams, useNavigate } from 'react-router-dom';
 import { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, MessageSquare, Send } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
 import { io } from 'socket.io-client';
 import LudoBoard from '../components/LudoBoard';
 import BingoBoard from '../components/BingoBoard';
@@ -14,11 +14,8 @@ export default function GameRoom({ user }) {
   const { roomId } = useParams();
   const navigate   = useNavigate();
   const [room, setRoom]         = useState(null);
-  const [messages, setMessages] = useState([]);
-  const [newMsg, setNewMsg]     = useState('');
   const [rolling, setRolling]   = useState(false);
   const socketRef = useRef(null);
-  const msgEndRef = useRef(null);
 
   useEffect(() => {
     const url = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
@@ -28,15 +25,11 @@ export default function GameRoom({ user }) {
     socket.emit('join_room', { roomId, user });
 
     socket.on('room_state_update', setRoom);
-    socket.on('receive_message', (msg) => setMessages(prev => [...prev, msg]));
     socket.on('room_deleted', () => { alert('Oda silindi.'); navigate('/lobby'); });
 
     return () => socket.close();
   }, [roomId, user, navigate]);
 
-  useEffect(() => {
-    msgEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
 
   const emit = (event, data) => socketRef.current?.emit(event, data);
 
@@ -48,14 +41,6 @@ export default function GameRoom({ user }) {
     setTimeout(() => setRolling(false), 800);
   };
 
-  const handleSend = (e) => {
-    e.preventDefault();
-    if (newMsg.trim()) {
-      emit('send_message', { roomId, message: { user: user.username, text: newMsg } });
-      setNewMsg('');
-    }
-  };
-
   const playerColor  = room?.players.find(p => p.id === user.id)?.color ?? null;
   const gameType     = room?.gameType ?? 'ludo';
   const gs           = room?.gameState;
@@ -64,8 +49,7 @@ export default function GameRoom({ user }) {
   const winner       = gs?.winner;
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: '20px', height: 'calc(100vh - 120px)' }}>
-      {/* ── OYUN ALANI ── */}
+    <div style={{ height: 'calc(100vh - 120px)' }}>
       <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         {/* Başlık */}
         <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--glass-border)', display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -225,44 +209,6 @@ export default function GameRoom({ user }) {
             </div>
           )}
         </div>
-      </div>
-
-      {/* ── SOHBET ── */}
-      <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column' }}>
-        <div style={{ padding: '15px', borderBottom: '1px solid var(--glass-border)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <MessageSquare size={18} />
-          <h3 style={{ margin: 0, fontSize: '16px' }}>Sohbet</h3>
-        </div>
-
-        <div style={{ flex: 1, overflowY: 'auto', padding: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          {messages.map((msg, i) => (
-            <div key={i} style={{
-              background: msg.user === user.username ? 'rgba(99,102,241,0.2)'
-                : msg.user === 'Sistem' ? 'rgba(16,185,129,0.1)' : 'rgba(255,255,255,0.05)',
-              padding: '8px 12px', borderRadius: '8px',
-              alignSelf: msg.user === user.username ? 'flex-end'
-                : msg.user === 'Sistem' ? 'center' : 'flex-start',
-              maxWidth: '90%',
-            }}>
-              <div style={{ fontSize: '11px', color: 'var(--accent-primary)', fontWeight: 'bold', marginBottom: '3px' }}>
-                {msg.user}
-              </div>
-              <div style={{ fontSize: '13px' }}>{msg.text}</div>
-            </div>
-          ))}
-          <div ref={msgEndRef} />
-        </div>
-
-        <form onSubmit={handleSend} style={{ padding: '12px', borderTop: '1px solid var(--glass-border)', display: 'flex', gap: '8px' }}>
-          <input
-            type="text" placeholder="Mesaj yaz…"
-            value={newMsg} onChange={e => setNewMsg(e.target.value)}
-            style={{ flex: 1, padding: '8px 12px' }}
-          />
-          <button type="submit" style={{ padding: '8px 12px' }}>
-            <Send size={16} />
-          </button>
-        </form>
       </div>
     </div>
   );
