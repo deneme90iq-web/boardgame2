@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { User, Lock, Gamepad2 } from 'lucide-react';
+import { User, Lock, Gamepad2, FlaskConical, X } from 'lucide-react';
 import { auth, db } from '../firebase';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
@@ -9,6 +9,16 @@ export default function Login({ onLogin }) {
   const [formData, setFormData] = useState({ username: '', email: '', password: '' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [testOpen, setTestOpen] = useState(false);
+  const [testName, setTestName] = useState('');
+
+  const handleTestLogin = (e) => {
+    e.preventDefault();
+    if (testName.trim()) {
+      const id = Math.random().toString(36).substring(2, 10);
+      onLogin({ id, username: testName.trim() });
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -97,6 +107,55 @@ export default function Login({ onLogin }) {
             {isRegistering ? 'Zaten hesabın var mı? Giriş Yap' : 'Hesabın yok mu? Kayıt Ol'}
           </button>
         </div>
+      </div>
+
+      {/* ── Sağ Alt Test Hesabı ── */}
+      <div style={{
+        position: 'fixed', bottom: '24px', right: '24px',
+        display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '10px',
+        zIndex: 100
+      }}>
+        {testOpen && (
+          <div style={{
+            background: 'rgba(15,23,42,0.95)', backdropFilter: 'blur(12px)',
+            border: '1px solid var(--glass-border)', borderRadius: '12px',
+            padding: '16px', width: '220px',
+            boxShadow: '0 8px 30px rgba(0,0,0,0.5)'
+          }}>
+            <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: '0 0 10px' }}>
+              Sadece bir isim girerek hızlıca test et
+            </p>
+            <form onSubmit={handleTestLogin} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <input
+                type="text" placeholder="Oyuncu adın"
+                value={testName}
+                onChange={e => setTestName(e.target.value)}
+                style={{ padding: '8px 12px', fontSize: '14px' }}
+                autoFocus
+                maxLength={15}
+                required
+              />
+              <button type="submit" style={{ padding: '8px', fontSize: '14px', background: 'rgba(99,102,241,0.6)' }}>
+                Giriş Yap
+              </button>
+            </form>
+          </div>
+        )}
+
+        <button
+          onClick={() => setTestOpen(o => !o)}
+          title="Test Hesabı"
+          style={{
+            width: '48px', height: '48px', borderRadius: '50%', padding: 0,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: testOpen ? 'rgba(99,102,241,0.4)' : 'rgba(30,41,59,0.9)',
+            border: '1px solid var(--glass-border)',
+            boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+            transition: 'all 0.2s'
+          }}
+        >
+          {testOpen ? <X size={20} /> : <FlaskConical size={20} />}
+        </button>
       </div>
     </div>
   );
