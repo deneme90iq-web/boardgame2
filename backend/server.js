@@ -12,26 +12,111 @@ app.use(express.json());
 
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: {
-    origin: '*',
-    methods: ['GET', 'POST']
-  }
+  cors: { origin: '*', methods: ['GET', 'POST'] }
 });
 
-// Veritabanına bağlan
-// connectDB(); // Şimdilik yoruma alıyoruz, MongoDB URI eklendiğinde açılacak
+app.get('/', (req, res) => res.send('Kutu Oyunu API Çalışıyor'));
 
-// Temel Route
-app.get('/', (req, res) => {
-  res.send('Kutu Oyunu API Çalışıyor');
-});
-
-// Oyun odaları verileri
 const rooms = {};
 
-// Socket.io Olayları
+// ============================================================
+// KIZMA BİRADER (LUDO) OYUN MANTIĞI
+// ============================================================
+
+// Her rengin ana yolda hangi mutlak hücreden başladığı
+const COLOR_START_ABS = { red: 0, green: 13, yellow: 26, blue: 39 };
+
+// Güvenli hücreler (mutlak pozisyon 0-51): başlangıç ve yıldız kareleri
+const SAFE_ABS = new Set([0, 8, 13, 21, 26, 34, 39, 47]);
+
+// Mutlak pozisyon hesapla
+function absPos(color, relPos) {
+  return (COLOR_START_ABS[color] + relPos) % 52;
+}
+
+// Piyon hareket edebilir mi?
+function canMove(pos, dice) {
+  if (pos === 105) return false;           // Bitişte, artık hareket etmez
+  if (pos === -1) return dice === 6;       // Kalede, sadece 6 ile çıkar
+  if (pos >= 0 && pos <= 51) {             // Ana yolda
+    const dest = pos + dice;
+    return dest <= 57;                     // 52=ev[0]...57=merkez(105)
+  }
+  if (pos >= 100 && pos <= 104) {          // Ev koridorunda
+    return pos + dice <= 105;
+  }
+  return false;
+}
+
+// Yeni pozisyonu hesapla
+function applyMove(pos, dice) {
+  if (pos === -1) return 0;
+  if (pos >= 0 && pos <= 51) {
+    const dest = pos + dice;
+    if (dest <= 51) return dest;
+    return 100 + (dest - 52);             // Ev koridoruna giriş
+  }
+  return pos + dice;                      // Ev koridorunda ilerleme
+}
+
+// Piyon yeme kontrolü: yiyen renk + yeni göreceli pozisyon
+function checkAndEat(room, eaterColor, newRelPos) {
+  if (newRelPos < 0 || newRelPos > 51) return false; // Sadece ana yolda yeme
+  const newAbs = absPos(eaterColor, newRelPos);
+  if (SAFE_ABS.has(newAbs)) return false; // Güvenli bölge
+  let ate = false;
+  Object.keys(room.gameState.pawns).forEach(color => {
+    if (color === eaterColor) return;
+    room.gameState.pawns[color].forEach((pos, idx) => {
+      if (pos >= 0 && pos <= 51) {
+        if (absPos(color, pos) === newAbs) {
+          room.gameState.pawns[color][idx] = -1; // Kaleye gönder
+          ate = true;
+        }
+      }
+    });
+  });
+  return ate;
+}
+
+// Sonraki oyuncuya geç
+function nextPlayerColor(players, currentColor) {
+  const idx = players.findIndex(p => p.color === currentColor);
+  return players[(idx + 1) % players.length].color;
+}
+
+// Oyuncu kazandı mı?
+function hasWon(pawns, color) {
+  return pawns[color].every(p => p === 105);
+}
+
+// Oyuncunun hareket ettirebileceği piyon indislerini döndür
+function getMovable(pawns, color, dice) {
+  return pawns[color]
+    .map((pos, idx) => ({ idx, pos }))
+    .filter(({ pos }) => canMove(pos, dice))
+    .map(({ idx }) => idx);
+}
+
+// Ludo başlangıç durumu
+function initLudoState(players) {
+  const pawns = {};
+  players.forEach(p => { pawns[p.color] = [-1, -1, -1, -1]; });
+  return {
+    turn: players[0].color,
+    lastDice: 0,
+    pawns,
+    movablePawns: [],
+    winner: null,
+  };
+}
+
+// ============================================================
+// SOCKET.IO OLAYLARI
+// ============================================================
+
 io.on('connection', (socket) => {
-  console.log('Yeni bir kullanıcı bağlandı:', socket.id);
+  console.log('Bağlandı:', socket.id);
 
   socket.on('get_rooms', () => {
     socket.emit('rooms_list', Object.values(rooms));
@@ -39,36 +124,27 @@ io.on('connection', (socket) => {
 
   socket.on('create_room', ({ roomId, name, gameType, maxPlayers, user }) => {
     rooms[roomId] = {
-      id: roomId,
-      name,
-      gameType,
-      status: 'waiting', // Lobi durumu
-      players: [{ ...user, color: 'red' }], // İlk oyuncu Kırmızı
+      id: roomId, name, gameType,
+      status: 'waiting',
+      players: [{ ...user, color: 'red' }],
       maxPlayers: gameType === 'ludo' ? 4 : maxPlayers,
       creatorId: user.id,
-      gameState: gameType === 'ludo' ? { 
-        turn: 'red',
-        lastDice: 0,
-        pawns: {
-          red: [-1, -1, -1, -1],
-          green: [-1, -1, -1, -1],
-          yellow: [-1, -1, -1, -1],
-          blue: [-1, -1, -1, -1]
-        }
-      } : { drawnNumbers: [] }
+      gameState: gameType === 'ludo'
+        ? initLudoState([{ ...user, color: 'red' }])
+        : { drawnNumbers: [] },
     };
     socket.join(roomId);
     io.emit('rooms_list', Object.values(rooms));
-    console.log(`Kullanıcı ${user.username} odayı kurdu: ${roomId}`);
+    console.log(`${user.username} odayı kurdu: ${roomId}`);
   });
 
   socket.on('delete_room', ({ roomId, user }) => {
     const room = rooms[roomId];
     if (room && room.creatorId === user.id) {
       delete rooms[roomId];
-      io.to(roomId).emit('room_deleted'); // Odadakilere haber ver
-      io.emit('rooms_list', Object.values(rooms)); // Lobiye güncel listeyi gönder
-      console.log(`Kullanıcı ${user.username} odayı sildi: ${roomId}`);
+      io.to(roomId).emit('room_deleted');
+      io.emit('rooms_list', Object.values(rooms));
+      console.log(`${user.username} odayı sildi: ${roomId}`);
     }
   });
 
@@ -76,188 +152,154 @@ io.on('connection', (socket) => {
     const room = rooms[roomId];
     if (room && room.players.length < room.maxPlayers && room.status === 'waiting') {
       if (!room.players.find(p => p.id === user.id)) {
-        const colors = ['red', 'green', 'yellow', 'blue'];
-        const usedColors = room.players.map(p => p.color);
-        const availableColors = colors.filter(c => !usedColors.includes(c));
-        const assignedColor = availableColors.length > 0 ? availableColors[0] : null;
-        room.players.push({ ...user, color: assignedColor });
+        const used = room.players.map(p => p.color);
+        const free = ['red','green','yellow','blue'].find(c => !used.includes(c));
+        room.players.push({ ...user, color: free || 'red' });
       }
       socket.join(roomId);
       io.to(roomId).emit('room_state_update', room);
       io.emit('rooms_list', Object.values(rooms));
-      console.log(`Kullanıcı ${user.username} odaya katıldı: ${roomId}`);
+    } else if (room && room.status === 'playing') {
+      // Oyun başlamışsa izleyici olarak katıl
+      socket.join(roomId);
+      socket.emit('room_state_update', room);
     } else if (!room) {
       socket.join(roomId);
     }
   });
 
-  // Lobi: Renk Seçimi
+  // --- LOBİ ---
   socket.on('select_color', ({ roomId, user, color }) => {
     const room = rooms[roomId];
-    if (room && room.status === 'waiting') {
-      const isTaken = room.players.some(p => p.color === color && p.id !== user.id);
-      if (!isTaken) {
-        const playerIndex = room.players.findIndex(p => p.id === user.id);
-        if (playerIndex !== -1) {
-          room.players[playerIndex].color = color;
-          io.to(roomId).emit('room_state_update', room);
-        }
-      }
+    if (!room || room.status !== 'waiting') return;
+    const taken = room.players.some(p => p.color === color && p.id !== user.id);
+    if (taken) return;
+    const idx = room.players.findIndex(p => p.id === user.id);
+    if (idx !== -1) {
+      room.players[idx].color = color;
+      io.to(roomId).emit('room_state_update', room);
     }
   });
 
-  // Lobi: Oyunu Başlat
   socket.on('start_game', ({ roomId, user }) => {
     const room = rooms[roomId];
-    if (room && room.creatorId === user.id && room.status === 'waiting' && room.players.length >= 2) {
-      room.status = 'playing';
-      if (room.gameType === 'ludo') {
-        room.gameState.turn = room.players[0].color; // Oyunu başlatan (veya ilk kişi) sırayı alır
-      }
-      io.to(roomId).emit('room_state_update', room);
-      io.emit('rooms_list', Object.values(rooms)); // Odadakilerin oyun içinde olduğunu lobiye yansıtmak isterseniz
-    }
+    if (!room || room.creatorId !== user.id || room.status !== 'waiting') return;
+    if (room.players.length < 2) return;
+    room.status = 'playing';
+    room.gameState = initLudoState(room.players);
+    io.to(roomId).emit('room_state_update', room);
+    io.emit('rooms_list', Object.values(rooms));
   });
 
-  // Sohbet Mesajları
+  // --- SOHBET ---
   socket.on('send_message', ({ roomId, message }) => {
     io.to(roomId).emit('receive_message', message);
   });
 
-  // Kızma Birader - Zar Atma
+  // --- KIZMA BİRADER ---
+
   socket.on('roll_dice', ({ roomId, user }) => {
     const room = rooms[roomId];
-    if (room && room.gameType === 'ludo') {
-      const player = room.players.find(p => p.id === user.id);
-      if (player && room.gameState.turn === player.color && room.gameState.lastDice === 0) {
-        const dice = Math.floor(Math.random() * 6) + 1;
-        room.gameState.lastDice = dice;
-        io.to(roomId).emit('dice_rolled', { user, dice });
-        io.to(roomId).emit('receive_message', { user: 'Sistem', text: `${user.username} zarı attı: ${dice}` });
-        
-        // Hamle yapılamayacak durumdaysa (ör: kalede ve 6 değil, başka piyon yok)
-        // Basitlik adına oyuncu "Pas Geç" tuşunu kullanabilir.
-        io.to(roomId).emit('room_state_update', room);
-      }
-    }
-  });
+    if (!room || room.gameType !== 'ludo' || room.status !== 'playing') return;
+    const gs = room.gameState;
+    if (gs.winner) return;
+    const player = room.players.find(p => p.id === user.id);
+    if (!player || gs.turn !== player.color || gs.lastDice !== 0) return;
 
-  const SAFE_ZONES = [0, 8, 13, 21, 26, 34, 39, 47]; // Yıldızlı ve başlangıç alanları (Mutlak koordinatlar 0-51)
-  const START_INDEX = { red: 0, green: 13, yellow: 26, blue: 39 };
+    const dice = Math.floor(Math.random() * 6) + 1;
+    gs.lastDice = dice;
+
+    const movable = getMovable(gs.pawns, player.color, dice);
+    gs.movablePawns = movable;
+
+    io.to(roomId).emit('receive_message', {
+      user: 'Sistem',
+      text: `${user.username} ${dice} attı`
+    });
+
+    if (movable.length === 0) {
+      // Hareket edilecek piyon yok → sırayı otomatik geç
+      io.to(roomId).emit('receive_message', {
+        user: 'Sistem',
+        text: `${user.username} oynayacak piyon bulamadı`
+      });
+      setTimeout(() => {
+        gs.lastDice = 0;
+        gs.movablePawns = [];
+        gs.turn = nextPlayerColor(room.players, player.color);
+        io.to(roomId).emit('room_state_update', room);
+      }, 1200);
+    }
+
+    io.to(roomId).emit('room_state_update', room);
+  });
 
   socket.on('move_pawn', ({ roomId, user, pawnIndex }) => {
     const room = rooms[roomId];
-    if (room && room.gameType === 'ludo') {
-      const player = room.players.find(p => p.id === user.id);
-      const dice = room.gameState.lastDice;
+    if (!room || room.gameType !== 'ludo' || room.status !== 'playing') return;
+    const gs = room.gameState;
+    if (gs.winner) return;
+    const player = room.players.find(p => p.id === user.id);
+    if (!player || gs.turn !== player.color || gs.lastDice === 0) return;
+    if (!gs.movablePawns.includes(pawnIndex)) return;
 
-      if (player && room.gameState.turn === player.color && dice > 0) {
-        let pos = room.gameState.pawns[player.color][pawnIndex];
-        let newPos = pos;
-        let moveValid = false;
+    const dice = gs.lastDice;
+    const oldPos = gs.pawns[player.color][pawnIndex];
+    const newPos = applyMove(oldPos, dice);
 
-        // Hamleyi kurallara göre hesapla
-        if (pos === -1) {
-          if (dice === 6) {
-            newPos = 0; // Yolun başlangıcına çık
-            moveValid = true;
-          }
-        } else if (pos >= 0 && pos <= 50) {
-          newPos = pos + dice;
-          if (newPos > 50) {
-            // Home bölgesine giriş
-            const overshoot = newPos - 51;
-            newPos = 100 + overshoot;
-          }
-          moveValid = true;
-        } else if (pos >= 100) {
-          newPos = pos + dice;
-          if (newPos <= 105) {
-            moveValid = true; // Tam isabetle veya ilerleyerek
-          }
-        }
+    gs.pawns[player.color][pawnIndex] = newPos;
+    gs.lastDice = 0;
+    gs.movablePawns = [];
 
-        if (moveValid) {
-          // Mutlak pozisyonu hesapla (sadece normal yol için)
-          let newAbsolutePos = -1;
-          if (newPos >= 0 && newPos <= 51) {
-            newAbsolutePos = (START_INDEX[player.color] + newPos) % 52;
-          }
-
-          // Piyon kırma kontrolü (Güvenli bölge değilse ve normal yoldaysa)
-          if (newAbsolutePos !== -1 && !SAFE_ZONES.includes(newAbsolutePos)) {
-            Object.keys(room.gameState.pawns).forEach(color => {
-              if (color !== player.color) {
-                room.gameState.pawns[color].forEach((otherPos, otherIdx) => {
-                  if (otherPos >= 0 && otherPos <= 51) {
-                    let otherAbsolutePos = (START_INDEX[color] + otherPos) % 52;
-                    if (otherAbsolutePos === newAbsolutePos) {
-                      // Kırıldı!
-                      room.gameState.pawns[color][otherIdx] = -1;
-                      io.to(roomId).emit('receive_message', { user: 'Sistem', text: `${player.username}, ${color} piyonunu kırdı!` });
-                    }
-                  }
-                });
-              }
-            });
-          }
-
-          // Pozisyonu güncelle
-          room.gameState.pawns[player.color][pawnIndex] = newPos;
-          room.gameState.lastDice = 0;
-
-          // 6 atan veya kırma yapan tekrar atar kuralı (şimdi sadece 6 atana hak verelim)
-          if (dice !== 6) {
-            const currentIndex = room.players.findIndex(p => p.color === player.color);
-            let nextIndex = (currentIndex + 1) % room.players.length;
-            room.gameState.turn = room.players[nextIndex].color;
-          }
-
-          // Oyun bitti mi kontrolü
-          const hasWon = room.gameState.pawns[player.color].every(p => p === 105);
-          if (hasWon) {
-             io.to(roomId).emit('receive_message', { user: 'Sistem', text: `🎉 ${player.username} OYUNU KAZANDI! 🎉` });
-             room.status = 'waiting'; // Oyunu lobiye döndür
-          }
-
-          io.to(roomId).emit('room_state_update', room);
-        }
-      }
+    // Yeme kontrolü (sadece ana yolda)
+    const ate = checkAndEat(room, player.color, newPos);
+    if (ate) {
+      io.to(roomId).emit('receive_message', {
+        user: 'Sistem',
+        text: `${user.username} piyon kırdı! Tekrar oynuyor!`
+      });
     }
+
+    // Kazanma kontrolü
+    if (hasWon(gs.pawns, player.color)) {
+      gs.winner = player.color;
+      gs.turn = null;
+      io.to(roomId).emit('receive_message', {
+        user: 'Sistem',
+        text: `🎉 ${user.username} OYUNU KAZANDI! 🎉`
+      });
+      io.to(roomId).emit('room_state_update', room);
+      return;
+    }
+
+    // Ekstra tur: 6 atma veya piyon yeme
+    if (dice === 6 || ate) {
+      // Aynı oyuncu tekrar atar
+      io.to(roomId).emit('receive_message', {
+        user: 'Sistem',
+        text: `${user.username} ${ate ? 'piyon kırdığı' : '6 attığı'} için tekrar oynuyor!`
+      });
+    } else {
+      gs.turn = nextPlayerColor(room.players, player.color);
+    }
+
+    io.to(roomId).emit('room_state_update', room);
   });
 
-  socket.on('pass_turn', ({ roomId, user }) => {
-    const room = rooms[roomId];
-    if (room && room.gameType === 'ludo') {
-      const player = room.players.find(p => p.id === user.id);
-      if (player && room.gameState.turn === player.color) {
-        const currentIndex = room.players.findIndex(p => p.color === player.color);
-        let nextIndex = (currentIndex + 1) % room.players.length;
-        room.gameState.turn = room.players[nextIndex].color;
-        room.gameState.lastDice = 0;
-        io.to(roomId).emit('room_state_update', room);
-      }
-    }
-  });
-
-  // Tombala - Taş Çekme
+  // --- TOMBALA ---
   socket.on('draw_number', ({ roomId, user }) => {
-    const number = Math.floor(Math.random() * 90) + 1;
     const room = rooms[roomId];
-    if (room && room.gameType === 'bingo') {
-      room.gameState.drawnNumbers.push(number);
-      io.to(roomId).emit('number_drawn', { user, number, allNumbers: room.gameState.drawnNumbers });
-      io.to(roomId).emit('receive_message', { user: 'Sistem', text: `Çekilen numara: ${number}` });
-    }
+    if (!room || room.gameType !== 'bingo') return;
+    const number = Math.floor(Math.random() * 90) + 1;
+    room.gameState.drawnNumbers.push(number);
+    io.to(roomId).emit('number_drawn', { user, number, allNumbers: room.gameState.drawnNumbers });
+    io.to(roomId).emit('receive_message', { user: 'Sistem', text: `Çekilen numara: ${number}` });
   });
 
   socket.on('disconnect', () => {
-    console.log('Kullanıcı ayrıldı:', socket.id);
-    // TODO: Kullanıcıyı odalardan temizle
+    console.log('Ayrıldı:', socket.id);
   });
 });
 
 const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => {
-  console.log(`Sunucu ${PORT} portunda çalışıyor`);
-});
+server.listen(PORT, () => console.log(`Sunucu ${PORT} portunda çalışıyor`));

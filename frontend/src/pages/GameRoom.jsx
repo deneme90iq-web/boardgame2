@@ -1,254 +1,251 @@
-import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { useState, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { useState, useEffect, useRef } from 'react';
 import { ArrowLeft, MessageSquare, Send } from 'lucide-react';
 import { io } from 'socket.io-client';
 import LudoBoard from '../components/LudoBoard';
 import BingoBoard from '../components/BingoBoard';
 
+const COLOR_LABEL = { red: 'Mavi', green: 'Sarı', yellow: 'Yeşil', blue: 'Turuncu' };
+const COLOR_HEX   = { red: '#0ea5e9', green: '#eab308', yellow: '#16a34a', blue: '#ea580c' };
+const COLOR_LOBBY = { red: '#ef4444', green: '#10b981', yellow: '#eab308', blue: '#3b82f6' };
+
 export default function GameRoom({ user }) {
   const { roomId } = useParams();
-  const navigate = useNavigate();
-  const [room, setRoom] = useState(null);
+  const navigate   = useNavigate();
+  const [room, setRoom]         = useState(null);
   const [messages, setMessages] = useState([]);
-  const [newMessage, setNewMessage] = useState('');
-  const [socket, setSocket] = useState(null);
+  const [newMsg, setNewMsg]     = useState('');
+  const socketRef = useRef(null);
+  const msgEndRef = useRef(null);
 
   useEffect(() => {
-    const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
-    const newSocket = io(backendUrl);
-    setSocket(newSocket);
+    const url = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
+    const socket = io(url);
+    socketRef.current = socket;
 
-    newSocket.emit('join_room', { roomId, user });
+    socket.emit('join_room', { roomId, user });
 
-    newSocket.on('room_state_update', (roomData) => {
-      setRoom(roomData);
-    });
+    socket.on('room_state_update', setRoom);
+    socket.on('receive_message', (msg) => setMessages(prev => [...prev, msg]));
+    socket.on('room_deleted', () => { alert('Oda silindi.'); navigate('/lobby'); });
 
-    newSocket.on('receive_message', (message) => {
-      setMessages(prev => [...prev, message]);
-    });
-
-    newSocket.on('dice_rolled', ({ user: roller, dice }) => {
-      // Zar atıldığında yapılacak animasyon vs eklenebilir
-      console.log(`${roller.username} zarı attı: ${dice}`);
-    });
-
-    newSocket.on('number_drawn', ({ user: drawer, number, allNumbers }) => {
-      setRoom(prev => ({
-        ...prev,
-        gameState: { ...prev.gameState, drawnNumbers: allNumbers }
-      }));
-    });
-
-    newSocket.on('room_deleted', () => {
-      alert('Bu oda kurucu tarafından silindi.');
-      navigate('/lobby');
-    });
-
-    return () => newSocket.close();
+    return () => socket.close();
   }, [roomId, user, navigate]);
 
-  const handleSendMessage = (e) => {
+  useEffect(() => {
+    msgEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  const emit = (event, data) => socketRef.current?.emit(event, data);
+
+  const handleSend = (e) => {
     e.preventDefault();
-    if (newMessage.trim() && socket) {
-      socket.emit('send_message', { roomId, message: { user: user.username, text: newMessage } });
-      setNewMessage('');
+    if (newMsg.trim()) {
+      emit('send_message', { roomId, message: { user: user.username, text: newMsg } });
+      setNewMsg('');
     }
   };
 
-  const handlePawnMove = (color, pawnIndex) => {
-    if (!room || room.gameType !== 'ludo') return;
-    
-    const player = room.players.find(p => p.id === user.id);
-    if (!player || player.color !== color) return; // Sadece kendi piyonuna tıklayabilir
-    if (room.gameState.turn !== color || room.gameState.lastDice === 0) return; // Sıra onda değil veya zar atmamış
-
-    socket.emit('move_pawn', { roomId, user, pawnIndex });
-  };
-
-  const handleRollDice = () => {
-    if (socket) socket.emit('roll_dice', { roomId, user });
-  };
-
-  const handleDrawNumber = () => {
-    if (socket) socket.emit('draw_number', { roomId, user });
-  };
-
-  const gameType = room ? room.gameType : 'ludo';
-  const playerColor = room ? room.players.find(p => p.id === user.id)?.color : null;
+  const playerColor  = room?.players.find(p => p.id === user.id)?.color ?? null;
+  const gameType     = room?.gameType ?? 'ludo';
+  const gs           = room?.gameState;
+  const isMyTurn     = gs?.turn === playerColor;
+  const canRoll      = isMyTurn && gs?.lastDice === 0 && !gs?.winner;
+  const winner       = gs?.winner;
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: '20px', height: 'calc(100vh - 120px)' }}>
-      {/* Oyun Alanı */}
+      {/* ── OYUN ALANI ── */}
       <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        <div style={{ padding: '20px', borderBottom: '1px solid var(--glass-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ display: 'flex', alignItems: 'center' }}>
-            <button 
-              onClick={() => navigate('/lobby')} 
-              style={{ background: 'none', boxShadow: 'none', padding: '8px', marginRight: '15px' }}
-            >
-              <ArrowLeft size={20} />
-            </button>
-            <h2 style={{ margin: 0 }}>Oda: {room ? room.name : roomId}</h2>
-          </div>
+        {/* Başlık */}
+        <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--glass-border)', display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <button onClick={() => navigate('/lobby')} style={{ background: 'none', boxShadow: 'none', padding: '6px' }}>
+            <ArrowLeft size={20} />
+          </button>
+          <h2 style={{ margin: 0, flex: 1 }}>Oda: {room?.name ?? roomId}</h2>
+          {room && <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Kod: <strong>{roomId}</strong></span>}
         </div>
-        <div style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', background: 'rgba(0,0,0,0.2)', overflow: 'auto', flexDirection: 'column' }}>
-          {room && (
-            <div style={{ padding: '10px', color: 'var(--text-secondary)' }}>
-              Odaktaki Oyuncular: {room.players.map(p => p.username).join(', ')}
+
+        {/* İçerik */}
+        <div style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '20px' }}>
+
+          {/* KAZANAN EKRANI */}
+          {winner && (
+            <div style={{
+              background: 'rgba(0,0,0,0.7)', borderRadius: '15px', padding: '30px 40px',
+              textAlign: 'center', marginBottom: '20px', border: `2px solid ${COLOR_HEX[winner]}`
+            }}>
+              <div style={{ fontSize: '48px', marginBottom: '10px' }}>🎉</div>
+              <h2 style={{ color: COLOR_HEX[winner] }}>
+                {room.players.find(p => p.color === winner)?.username} KAZANDI!
+              </h2>
             </div>
           )}
-          
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', padding: '20px' }}>
-            {room && room.status === 'waiting' ? (
-              // BEKLEME SALONU (LOBİ) ARAYÜZÜ
-              <div style={{ background: 'rgba(0,0,0,0.4)', padding: '30px', borderRadius: '15px', width: '100%', maxWidth: '500px', textAlign: 'center' }}>
-                <h2>Oda Bekleme Salonu</h2>
-                <p>Oyuncuların katılması ve renk seçmesi bekleniyor...</p>
-                
-                <div style={{ margin: '30px 0', display: 'flex', justifyContent: 'center', gap: '20px' }}>
-                 {['red', 'green', 'yellow', 'blue'].map(c => {
-                    const playerWithColor = room.players.find(p => p.color === c);
-                    const isTaken = !!playerWithColor;
-                    const isMyColor = playerWithColor?.id === user.id;
-                    const colorLabels = { red: 'Kırmızı', green: 'Yeşil', yellow: 'Sarı', blue: 'Mavi' };
-                    const colorCodes = { red: '#ef4444', green: '#10b981', yellow: '#eab308', blue: '#3b82f6' };
-                    
-                    return (
-                      <div key={c} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
-                        <button
-                          onClick={() => {
-                            // Eğer bu renk başkasındaysa tıklanamaz
-                            if (isTaken && !isMyColor) return;
-                            // Eğer bu benim rengimse veya boşsa seç
-                            socket.emit('select_color', { roomId, user, color: c });
-                          }}
-                          style={{
-                            width: '64px', height: '64px', borderRadius: '50%',
-                            backgroundColor: colorCodes[c],
-                            border: isMyColor ? '4px solid white' : isTaken ? '2px solid #666' : '2px solid transparent',
-                            opacity: isTaken && !isMyColor ? 0.35 : 1,
-                            cursor: isTaken && !isMyColor ? 'not-allowed' : 'pointer',
-                            boxShadow: isMyColor ? `0 0 20px ${colorCodes[c]}, 0 0 6px rgba(255,255,255,0.5)` : 'none',
-                            transform: isMyColor ? 'scale(1.15)' : 'scale(1)',
-                            transition: 'all 0.2s'
-                          }}
-                          title={isTaken && !isMyColor ? `${playerWithColor.username} seçti` : `${colorLabels[c]} seç`}
-                        />
-                        <span style={{ fontSize: '12px', fontWeight: isMyColor ? 'bold' : 'normal', color: isMyColor ? colorCodes[c] : 'var(--text-secondary)' }}>
-                          {isTaken ? `${playerWithColor.username}${isMyColor ? ' (Sen)' : ''}` : colorLabels[c]}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
 
-                {room.creatorId === user.id ? (
-                  <button 
-                    onClick={() => socket.emit('start_game', { roomId, user })}
-                    disabled={room.players.length < 2}
-                    style={{ padding: '10px 20px', background: room.players.length >= 2 ? 'var(--accent-primary)' : 'gray', fontSize: '16px' }}
-                  >
-                    Oyunu Başlat
-                  </button>
-                ) : (
-                  <p style={{ color: 'var(--text-secondary)' }}>Kurucunun oyunu başlatması bekleniyor...</p>
-                )}
-                
-                {room.players.length < 2 && (
-                  <p style={{ color: '#ef4444', fontSize: '12px', marginTop: '10px' }}>Başlamak için en az 2 kişi olmalı.</p>
-                )}
+          {/* LOBİ */}
+          {room?.status === 'waiting' && (
+            <div style={{
+              background: 'rgba(0,0,0,0.4)', padding: '30px', borderRadius: '15px',
+              width: '100%', maxWidth: '500px', textAlign: 'center'
+            }}>
+              <h2 style={{ margin: '0 0 8px' }}>Bekleme Salonu</h2>
+              <p style={{ color: 'var(--text-secondary)', margin: '0 0 24px' }}>
+                Oyuncular katılsın ve renk seçsin
+              </p>
+
+              {/* Renk Paleti */}
+              <div style={{ display: 'flex', justifyContent: 'center', gap: '24px', marginBottom: '28px' }}>
+                {['red','green','yellow','blue'].map(c => {
+                  const taken    = room.players.find(p => p.color === c);
+                  const isMe     = taken?.id === user.id;
+                  const disabled = !!taken && !isMe;
+                  const label    = { red:'Kırmızı', green:'Yeşil', yellow:'Sarı', blue:'Mavi' }[c];
+                  return (
+                    <div key={c} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+                      <button
+                        onClick={() => !disabled && emit('select_color', { roomId, user, color: c })}
+                        style={{
+                          width: '64px', height: '64px', borderRadius: '50%',
+                          backgroundColor: COLOR_LOBBY[c],
+                          border: isMe ? '4px solid white' : disabled ? '2px solid #444' : '2px solid transparent',
+                          opacity: disabled ? 0.35 : 1,
+                          cursor: disabled ? 'not-allowed' : 'pointer',
+                          boxShadow: isMe ? `0 0 18px ${COLOR_LOBBY[c]}` : 'none',
+                          transform: isMe ? 'scale(1.15)' : 'scale(1)',
+                          transition: 'all 0.2s',
+                          padding: 0,
+                        }}
+                        title={disabled ? `${taken.username} seçti` : `${label} seç`}
+                      />
+                      <span style={{
+                        fontSize: '12px',
+                        fontWeight: isMe ? 'bold' : 'normal',
+                        color: isMe ? COLOR_LOBBY[c] : 'var(--text-secondary)'
+                      }}>
+                        {taken ? `${taken.username}${isMe ? ' ✓' : ''}` : label}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
-            ) : (
-              // OYUN ARAYÜZÜ (BAŞLAMIŞ OYUN)
-              <>
-                {gameType === 'ludo' && room && room.gameState && (
-                  <div style={{ marginBottom: '20px', textAlign: 'center', width: '100%' }}>
-                    {/* Kimin sırası */}
-                    <h3 style={{ margin: '0 0 10px 0', color: room.gameState.turn === 'red' ? '#ef4444' : room.gameState.turn === 'green' ? '#10b981' : room.gameState.turn === 'yellow' ? '#eab308' : '#3b82f6' }}>
-                      Sıra: {room.gameState.turn === 'red' ? 'Kırmızı' : room.gameState.turn === 'green' ? 'Yeşil' : room.gameState.turn === 'yellow' ? 'Sarı' : 'Mavi'}
-                      {room.gameState.turn === playerColor ? ' (Sen)' : ''}
-                    </h3>
-                    
-                    {room.gameState.lastDice > 0 && (
-                      <div style={{ fontSize: '18px', marginBottom: '10px' }}>
-                        Atılan Zar: <strong>{room.gameState.lastDice}</strong>
-                      </div>
-                    )}
-                    
-                    {/* Sadece sırası gelen kişinin ekranında Zar At ve Pas Geç görünür */}
-                    {room.gameState.turn === playerColor && (
-                      <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', marginBottom: '20px' }}>
-                        <button 
-                          onClick={handleRollDice} 
-                          disabled={room.gameState.lastDice > 0}
-                          style={{ padding: '10px 24px', fontSize: '16px' }}
-                        >
-                          🎲 Zar At
-                        </button>
-                        {room.gameState.lastDice > 0 && (
-                          <button 
-                            onClick={() => { if (socket) socket.emit('pass_turn', { roomId, user }) }} 
-                            style={{ background: 'rgba(255,255,255,0.1)', color: 'white', padding: '10px 16px' }}
-                          >
-                            Pas Geç
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
-                
-                {gameType === 'ludo' ? (
-                  <LudoBoard roomState={room?.gameState} onMove={handlePawnMove} />
-                ) : (
-                  <>
-                    <BingoBoard roomState={room?.gameState} />
-                    <button onClick={handleDrawNumber} style={{ marginTop: '20px', padding: '6px 12px', background: 'linear-gradient(135deg, #10b981, #059669)' }}>
-                      Taş Çek
-                    </button>
-                  </>
-                )}
-              </>
-            )}
-          </div>
+
+              {/* Başlat / Bekle */}
+              {room.creatorId === user.id ? (
+                <button
+                  onClick={() => emit('start_game', { roomId, user })}
+                  disabled={room.players.length < 2}
+                  style={{
+                    padding: '12px 28px', fontSize: '16px', fontWeight: 'bold',
+                    background: room.players.length >= 2 ? 'var(--accent-primary)' : '#555',
+                  }}
+                >
+                  🎮 Oyunu Başlat
+                </button>
+              ) : (
+                <p style={{ color: 'var(--text-secondary)' }}>
+                  Kurucu oyunu başlatmayı bekliyor…
+                </p>
+              )}
+              {room.players.length < 2 && (
+                <p style={{ color: '#f87171', fontSize: '12px', marginTop: '8px' }}>
+                  En az 2 kişi gerekli
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* OYUN */}
+          {room?.status === 'playing' && (
+            <div style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+              {/* Sıra ve Zar Bilgisi */}
+              {gs && !winner && (
+                <div style={{ marginBottom: '16px', textAlign: 'center' }}>
+                  <h3 style={{ margin: '0 0 8px', color: COLOR_HEX[gs.turn] }}>
+                    Sıra: {room.players.find(p => p.color === gs.turn)?.username}
+                    {gs.turn === playerColor ? ' (Sen)' : ''}
+                  </h3>
+                  {gs.lastDice > 0 && (
+                    <div style={{ fontSize: '20px', marginBottom: '10px' }}>
+                      Zar: <strong>{gs.lastDice}</strong>
+                    </div>
+                  )}
+                  {/* Sadece aktif oyuncuya göster */}
+                  {isMyTurn && !winner && (
+                    <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
+                      <button
+                        onClick={() => emit('roll_dice', { roomId, user })}
+                        disabled={!canRoll}
+                        style={{ padding: '10px 24px', fontSize: '15px', opacity: canRoll ? 1 : 0.5 }}
+                      >
+                        🎲 Zar At
+                      </button>
+                      {gs.lastDice > 0 && gs.movablePawns?.length === 0 && (
+                        <span style={{ color: 'var(--text-secondary)', alignSelf: 'center', fontSize: '13px' }}>
+                          ⏳ Sıra geçiyor…
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* TAHTA */}
+              {gameType === 'ludo' ? (
+                <LudoBoard
+                  roomState={gs}
+                  playerColor={playerColor}
+                  onMove={(color, idx) => emit('move_pawn', { roomId, user, pawnIndex: idx })}
+                />
+              ) : (
+                <>
+                  <BingoBoard roomState={gs} />
+                  <button
+                    onClick={() => emit('draw_number', { roomId, user })}
+                    style={{ marginTop: '20px', background: 'linear-gradient(135deg, #10b981, #059669)' }}
+                  >
+                    Taş Çek
+                  </button>
+                </>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Sohbet Alanı */}
+      {/* ── SOHBET ── */}
       <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column' }}>
-        <div style={{ padding: '15px', borderBottom: '1px solid var(--glass-border)', display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <div style={{ padding: '15px', borderBottom: '1px solid var(--glass-border)', display: 'flex', alignItems: 'center', gap: '8px' }}>
           <MessageSquare size={18} />
-          <h3 style={{ fontSize: '16px', margin: 0 }}>Sohbet</h3>
-        </div>
-        
-        <div style={{ flex: 1, overflowY: 'auto', padding: '15px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          {messages.map((msg, idx) => (
-            <div key={idx} style={{ 
-              background: msg.user === user.username ? 'rgba(99, 102, 241, 0.2)' : 'rgba(255,255,255,0.05)',
-              padding: '10px',
-              borderRadius: '8px',
-              alignSelf: msg.user === user.username ? 'flex-end' : 'flex-start',
-              maxWidth: '90%'
-            }}>
-              <div style={{ fontSize: '12px', color: 'var(--accent-primary)', marginBottom: '4px', fontWeight: 'bold' }}>
-                {msg.user}
-              </div>
-              <div style={{ fontSize: '14px' }}>{msg.text}</div>
-            </div>
-          ))}
+          <h3 style={{ margin: 0, fontSize: '16px' }}>Sohbet</h3>
         </div>
 
-        <form onSubmit={handleSendMessage} style={{ padding: '15px', borderTop: '1px solid var(--glass-border)', display: 'flex', gap: '10px' }}>
-          <input 
-            type="text" 
-            placeholder="Mesaj yaz..." 
-            value={newMessage}
-            onChange={(e) => setNewMessage(e.target.value)}
-            style={{ padding: '10px' }}
+        <div style={{ flex: 1, overflowY: 'auto', padding: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {messages.map((msg, i) => (
+            <div key={i} style={{
+              background: msg.user === user.username ? 'rgba(99,102,241,0.2)'
+                : msg.user === 'Sistem' ? 'rgba(16,185,129,0.1)' : 'rgba(255,255,255,0.05)',
+              padding: '8px 12px', borderRadius: '8px',
+              alignSelf: msg.user === user.username ? 'flex-end'
+                : msg.user === 'Sistem' ? 'center' : 'flex-start',
+              maxWidth: '90%',
+            }}>
+              <div style={{ fontSize: '11px', color: 'var(--accent-primary)', fontWeight: 'bold', marginBottom: '3px' }}>
+                {msg.user}
+              </div>
+              <div style={{ fontSize: '13px' }}>{msg.text}</div>
+            </div>
+          ))}
+          <div ref={msgEndRef} />
+        </div>
+
+        <form onSubmit={handleSend} style={{ padding: '12px', borderTop: '1px solid var(--glass-border)', display: 'flex', gap: '8px' }}>
+          <input
+            type="text" placeholder="Mesaj yaz…"
+            value={newMsg} onChange={e => setNewMsg(e.target.value)}
+            style={{ flex: 1, padding: '8px 12px' }}
           />
-          <button type="submit" style={{ padding: '10px' }}>
-            <Send size={18} />
+          <button type="submit" style={{ padding: '8px 12px' }}>
+            <Send size={16} />
           </button>
         </form>
       </div>
