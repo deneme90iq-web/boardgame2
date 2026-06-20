@@ -56,6 +56,43 @@ export default function GameRoom({ user }) {
     }
   };
 
+  const handlePawnMove = (color, pawnIndex) => {
+    if (!room || room.gameType !== 'ludo') return;
+    
+    const player = room.players.find(p => p.id === user.id);
+    if (!player || player.color !== color) {
+      // Sadece kendi piyonuna tıklayabilir
+      return;
+    }
+
+    if (room.gameState.turn !== color || room.gameState.lastDice === 0) {
+      // Sıra onda değil veya zar atmamış
+      return;
+    }
+
+    const pos = room.gameState.pawns[color][pawnIndex];
+    const dice = room.gameState.lastDice;
+    let newPos = pos;
+
+    if (pos === -1) {
+      if (dice === 6) newPos = 0;
+      else return; // 6 atmadan çıkamaz
+    } else if (pos >= 0 && pos <= 50) {
+      newPos = pos + dice;
+      if (newPos > 50) {
+        const overshoot = newPos - 51;
+        newPos = 100 + overshoot;
+      }
+    } else if (pos >= 100) {
+      newPos = pos + dice;
+      if (newPos > 105) return; // Bitişi geçemez
+    } else {
+      return; // Zaten bitmiş
+    }
+
+    socket.emit('move_pawn', { roomId, user, pawnIndex, newPos });
+  };
+
   const handleRollDice = () => {
     if (socket) socket.emit('roll_dice', { roomId, user });
   };
@@ -80,26 +117,50 @@ export default function GameRoom({ user }) {
             </button>
             <h2 style={{ margin: 0 }}>Oda: {room ? room.name : roomId}</h2>
           </div>
-          <div>
-            {gameType === 'ludo' ? (
-              <button onClick={handleRollDice} style={{ padding: '6px 12px', fontSize: '12px' }}>
-                Zar At
-              </button>
-            ) : (
-              <button onClick={handleDrawNumber} style={{ padding: '6px 12px', fontSize: '12px', background: 'linear-gradient(135deg, #10b981, #059669)' }}>
-                Taş Çek
-              </button>
-            )}
-          </div>
-        </div>
-        
         <div style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', background: 'rgba(0,0,0,0.2)', overflow: 'auto', flexDirection: 'column' }}>
           {room && (
             <div style={{ padding: '10px', color: 'var(--text-secondary)' }}>
               Odaktaki Oyuncular: {room.players.map(p => p.username).join(', ')}
             </div>
           )}
-          {gameType === 'ludo' ? <LudoBoard /> : <BingoBoard roomState={room?.gameState} />}
+          
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
+            {gameType === 'ludo' && room && room.gameState && (
+              <div style={{ marginBottom: '20px', textAlign: 'center', width: '100%' }}>
+                <h3 style={{ margin: '0 0 10px 0', color: room.gameState.turn === 'red' ? '#ef4444' : room.gameState.turn === 'green' ? '#10b981' : room.gameState.turn === 'yellow' ? '#eab308' : '#3b82f6' }}>
+                  Sıra: {room.gameState.turn === 'red' ? 'Kırmızı' : room.gameState.turn === 'green' ? 'Yeşil' : room.gameState.turn === 'yellow' ? 'Sarı' : 'Mavi'}
+                </h3>
+                {room.gameState.lastDice > 0 && (
+                  <div style={{ fontSize: '18px', marginBottom: '10px' }}>
+                    Atılan Zar: <strong>{room.gameState.lastDice}</strong>
+                  </div>
+                )}
+                
+                <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', marginBottom: '20px' }}>
+                  <button onClick={handleRollDice} disabled={room.gameState.turn !== playerColor || room.gameState.lastDice > 0}>
+                    Zar At
+                  </button>
+                  <button 
+                    onClick={() => { if (socket) socket.emit('pass_turn', { roomId, user }) }} 
+                    disabled={room.gameState.turn !== playerColor || room.gameState.lastDice === 0} 
+                    style={{ background: 'rgba(255,255,255,0.1)', color: 'white' }}>
+                    Pas Geç
+                  </button>
+                </div>
+              </div>
+            )}
+            
+            {gameType === 'ludo' ? (
+              <LudoBoard roomState={room?.gameState} onMove={handlePawnMove} />
+            ) : (
+              <>
+                <BingoBoard roomState={room?.gameState} />
+                <button onClick={handleDrawNumber} style={{ marginTop: '20px', padding: '6px 12px', background: 'linear-gradient(135deg, #10b981, #059669)' }}>
+                  Taş Çek
+                </button>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
