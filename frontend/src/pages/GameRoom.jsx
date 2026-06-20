@@ -6,9 +6,11 @@ import LudoBoard from '../components/LudoBoard';
 import BingoBoard from '../components/BingoBoard';
 import Dice from '../components/Dice';
 
-const COLOR_LABEL = { red: 'Mavi', green: 'Sarı', yellow: 'Yeşil', blue: 'Turuncu' };
-const COLOR_HEX   = { red: '#0ea5e9', green: '#eab308', yellow: '#16a34a', blue: '#ea580c' };
-const COLOR_LOBBY = { red: '#ef4444', green: '#10b981', yellow: '#eab308', blue: '#3b82f6' };
+
+const COLOR_HEX   = { red: '#ef4444', green: '#3b82f6', yellow: '#22c55e', blue: '#eab308' };
+const COLOR_LOBBY = { red: '#ef4444', green: '#3b82f6', yellow: '#22c55e', blue: '#eab308' };
+const COLOR_NAME  = { red: 'Kırmızı', green: 'Mavi', yellow: 'Yeşil', blue: 'Sarı' };
+
 
 export default function GameRoom({ user }) {
   const { roomId } = useParams();
@@ -93,7 +95,7 @@ export default function GameRoom({ user }) {
                   const taken    = room.players.find(p => p.color === c);
                   const isMe     = taken?.id === user.id;
                   const disabled = !!taken && !isMe;
-                  const label    = { red:'Kırmızı', green:'Yeşil', yellow:'Sarı', blue:'Mavi' }[c];
+                  const label    = COLOR_NAME[c];
                   return (
                     <div key={c} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
                       <button
