@@ -45,11 +45,19 @@ const START_INDEX = {
   blue: 39
 };
 
+const START_CELLS = {
+  red: [6, 1],
+  green: [1, 8],
+  yellow: [8, 13],
+  blue: [13, 6]
+};
+
+// Resimdeki renklere göre güncelledik (Sol üst mavi gibi görünüyor ama backend uyumluluğu için renkleri bizim backend'e göre (Kırmızı sol üst) tutalım, tonlarını resme benzetelim)
 const COLORS = {
-  red: '#ef4444',
-  green: '#10b981',
-  yellow: '#eab308',
-  blue: '#3b82f6'
+  red: '#0ea5e9',    // Resimde sol üst MAVİ
+  green: '#facc15',  // Resimde sağ üst SARI
+  yellow: '#16a34a', // Resimde sağ alt YEŞİL
+  blue: '#ea580c'    // Resimde sol alt TURUNCU/KIRMIZI
 };
 
 export default function LudoBoard({ roomState, onMove }) {
@@ -61,114 +69,148 @@ export default function LudoBoard({ roomState, onMove }) {
   };
 
   const getPawnPosition = (color, pos) => {
-    if (pos === -1) {
-      // In base
-      return null;
-    }
+    if (pos === -1) return null;
     if (pos >= 0 && pos <= 51) {
-      // On track
       const trackIndex = (START_INDEX[color] + pos) % 52;
       return PATH[trackIndex];
     }
     if (pos >= 100 && pos <= 104) {
-      // In home stretch
       return HOME_PATHS[color][pos - 100];
     }
-    return null; // Finished
+    return null;
   };
 
   const cells = [];
   for (let r = 0; r < 15; r++) {
     for (let c = 0; c < 15; c++) {
-      let bgColor = 'transparent';
-      let border = '1px solid rgba(255,255,255,0.05)';
-      
-      // Draw bases
-      if (r < 6 && c < 6) bgColor = 'rgba(239, 68, 68, 0.1)';
-      if (r < 6 && c > 8) bgColor = 'rgba(16, 185, 129, 0.1)';
-      if (r > 8 && c > 8) bgColor = 'rgba(234, 179, 8, 0.1)';
-      if (r > 8 && c < 6) bgColor = 'rgba(59, 130, 246, 0.1)';
+      // Sadece yol ve ev hücrelerini çizeceğiz
+      let isTrack = PATH.some(([pr, pc]) => pr === r && pc === c);
+      let homeColor = null;
+      let startColor = null;
 
-      // Draw safe spots
-      if (r === 6 && c === 1) bgColor = 'rgba(239, 68, 68, 0.3)';
-      if (r === 1 && c === 8) bgColor = 'rgba(16, 185, 129, 0.3)';
-      if (r === 8 && c === 13) bgColor = 'rgba(234, 179, 8, 0.3)';
-      if (r === 13 && c === 6) bgColor = 'rgba(59, 130, 246, 0.3)';
+      Object.entries(HOME_PATHS).forEach(([color, path]) => {
+        if (path.some(([hr, hc]) => hr === r && hc === c)) homeColor = color;
+      });
 
-      // Draw home paths
-      HOME_PATHS.red.forEach(([hr, hc]) => { if (r === hr && c === hc) bgColor = 'rgba(239, 68, 68, 0.2)' });
-      HOME_PATHS.green.forEach(([hr, hc]) => { if (r === hr && c === hc) bgColor = 'rgba(16, 185, 129, 0.2)' });
-      HOME_PATHS.yellow.forEach(([hr, hc]) => { if (r === hr && c === hc) bgColor = 'rgba(234, 179, 8, 0.2)' });
-      HOME_PATHS.blue.forEach(([hr, hc]) => { if (r === hr && c === hc) bgColor = 'rgba(59, 130, 246, 0.2)' });
+      Object.entries(START_CELLS).forEach(([color, [sr, sc]]) => {
+        if (sr === r && sc === c) startColor = color;
+      });
 
-      // Draw Center
-      if (r >= 6 && r <= 8 && c >= 6 && c <= 8) {
-        bgColor = 'rgba(255,255,255,0.05)';
+      if (isTrack || homeColor) {
+        cells.push({ r, c, isTrack, homeColor, startColor });
       }
-
-      cells.push({ r, c, bgColor, border });
     }
   }
 
   return (
     <div style={{ display: 'flex', justifyContent: 'center', padding: '20px' }}>
       <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(15, 25px)',
-        gridTemplateRows: 'repeat(15, 25px)',
-        gap: '2px',
-        background: 'var(--glass-bg)',
-        padding: '10px',
-        borderRadius: '12px',
-        border: '1px solid var(--glass-border)',
-        position: 'relative'
+        width: '450px',
+        height: '450px',
+        // Ahşap görünümü için arkaplan
+        backgroundColor: '#e6cda3',
+        backgroundImage: 'repeating-linear-gradient(45deg, rgba(0,0,0,0.03) 0px, rgba(0,0,0,0.03) 2px, transparent 2px, transparent 4px), linear-gradient(90deg, #e6cda3, #d4b581)',
+        position: 'relative',
+        borderRadius: '8px',
+        boxShadow: '0 10px 30px rgba(0,0,0,0.5)',
+        border: '4px solid #b8935d',
+        overflow: 'hidden'
       }}>
-        {cells.map((cell, i) => (
-          <div key={i} style={{
-            gridRow: cell.r + 1,
-            gridColumn: cell.c + 1,
-            backgroundColor: cell.bgColor,
-            border: cell.border,
-            borderRadius: '4px'
-          }} />
-        ))}
+        
+        {/* PARK ALANI Yazıları */}
+        <div style={{ position: 'absolute', top: '15px', left: '15px', fontWeight: 'bold', fontSize: '14px', color: '#333' }}>PARK ALANI</div>
+        <div style={{ position: 'absolute', top: '15px', right: '15px', fontWeight: 'bold', fontSize: '14px', color: '#333' }}>PARK ALANI</div>
+        <div style={{ position: 'absolute', bottom: '15px', left: '15px', fontWeight: 'bold', fontSize: '14px', color: '#333' }}>PARK ALANI</div>
+        <div style={{ position: 'absolute', bottom: '15px', right: '15px', fontWeight: 'bold', fontSize: '14px', color: '#333' }}>PARK ALANI</div>
 
-        {/* Draw Pawns */}
-        {Object.entries(pawns).map(([color, positions]) => 
-          positions.map((pos, idx) => {
-            let pr, pc;
-            if (pos === -1) {
-              pr = BASE_POSITIONS[color][idx][0];
-              pc = BASE_POSITIONS[color][idx][1];
-            } else {
-              const coord = getPawnPosition(color, pos);
-              if (!coord) return null; // Finished
-              pr = coord[0];
-              pc = coord[1];
-            }
+        {/* Büyük Renkli Daireler (Kaleler) */}
+        <div style={{ position: 'absolute', top: '35px', left: '35px', width: '130px', height: '130px', borderRadius: '50%', backgroundColor: COLORS.red, border: '2px solid #333', display: 'flex', flexWrap: 'wrap', justifyContent: 'center', alignContent: 'center', gap: '10px' }}>
+          {[0,1,2,3].map(i => <div key={i} style={{ width: '35px', height: '35px', borderRadius: '50%', backgroundColor: 'white', border: '1px solid #ccc' }} />)}
+        </div>
+        <div style={{ position: 'absolute', top: '35px', right: '35px', width: '130px', height: '130px', borderRadius: '50%', backgroundColor: COLORS.green, border: '2px solid #333', display: 'flex', flexWrap: 'wrap', justifyContent: 'center', alignContent: 'center', gap: '10px' }}>
+          {[0,1,2,3].map(i => <div key={i} style={{ width: '35px', height: '35px', borderRadius: '50%', backgroundColor: 'white', border: '1px solid #ccc' }} />)}
+        </div>
+        <div style={{ position: 'absolute', bottom: '35px', right: '35px', width: '130px', height: '130px', borderRadius: '50%', backgroundColor: COLORS.yellow, border: '2px solid #333', display: 'flex', flexWrap: 'wrap', justifyContent: 'center', alignContent: 'center', gap: '10px' }}>
+          {[0,1,2,3].map(i => <div key={i} style={{ width: '35px', height: '35px', borderRadius: '50%', backgroundColor: 'white', border: '1px solid #ccc' }} />)}
+        </div>
+        <div style={{ position: 'absolute', bottom: '35px', left: '35px', width: '130px', height: '130px', borderRadius: '50%', backgroundColor: COLORS.blue, border: '2px solid #333', display: 'flex', flexWrap: 'wrap', justifyContent: 'center', alignContent: 'center', gap: '10px' }}>
+          {[0,1,2,3].map(i => <div key={i} style={{ width: '35px', height: '35px', borderRadius: '50%', backgroundColor: 'white', border: '1px solid #ccc' }} />)}
+        </div>
 
-            return (
-              <div 
-                key={`${color}-${idx}`}
-                onClick={() => onMove(color, idx)}
-                style={{
-                  gridRow: pr + 1,
-                  gridColumn: pc + 1,
-                  width: '80%',
-                  height: '80%',
-                  margin: '10%',
-                  backgroundColor: COLORS[color],
-                  borderRadius: '50%',
-                  boxShadow: '0 2px 4px rgba(0,0,0,0.4), inset 0 2px 2px rgba(255,255,255,0.4)',
-                  cursor: 'pointer',
-                  zIndex: 10,
-                  transition: 'all 0.3s ease',
-                  border: '2px solid rgba(255,255,255,0.8)'
-                }}
-              />
-            );
-          })
-        )}
+        {/* Izgara ve Yollar */}
+        <div style={{
+          position: 'absolute',
+          top: '50%', left: '50%',
+          transform: 'translate(-50%, -50%)',
+          display: 'grid',
+          gridTemplateColumns: 'repeat(15, 26px)',
+          gridTemplateRows: 'repeat(15, 26px)',
+          gap: '2px',
+          width: 'max-content',
+          height: 'max-content'
+        }}>
+          {cells.map((cell, i) => (
+            <div key={i} style={{
+              gridRow: cell.r + 1,
+              gridColumn: cell.c + 1,
+              backgroundColor: cell.homeColor ? COLORS[cell.homeColor] : 'white',
+              border: '1px solid #666',
+              borderRadius: '50%', // Yuvarlak hücreler
+              position: 'relative',
+              boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.1)'
+            }}>
+              {/* Başlangıç okları */}
+              {cell.startColor && (
+                <div style={{
+                  position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+                  color: COLORS[cell.startColor], fontSize: '18px', fontWeight: 'bold'
+                }}>
+                  {cell.startColor === 'red' ? '➔' : cell.startColor === 'green' ? '⬇' : cell.startColor === 'yellow' ? '⬅' : '⬆'}
+                </div>
+              )}
+            </div>
+          ))}
+
+          {/* Piyonlar */}
+          {Object.entries(pawns).map(([color, positions]) => 
+            positions.map((pos, idx) => {
+              let pr, pc;
+              if (pos === -1) {
+                // Kaleye piyonları koy
+                pr = BASE_POSITIONS[color][idx][0];
+                pc = BASE_POSITIONS[color][idx][1];
+                // Kalenin içindeki küçük beyaz dairelerin içine oturtmak için ince ayar
+                // Bu grid sisteminde kaleleri tam eşleştiremeyebiliriz ama grid üzerinden görsel olarak yerleştireceğiz
+              } else {
+                const coord = getPawnPosition(color, pos);
+                if (!coord) return null; // Bitti
+                pr = coord[0];
+                pc = coord[1];
+              }
+
+              return (
+                <div 
+                  key={`${color}-${idx}`}
+                  onClick={() => onMove(color, idx)}
+                  style={{
+                    gridRow: pr + 1,
+                    gridColumn: pc + 1,
+                    width: '20px',
+                    height: '20px',
+                    margin: '3px',
+                    backgroundColor: COLORS[color],
+                    borderRadius: '50%',
+                    boxShadow: '0 3px 6px rgba(0,0,0,0.6), inset 0 -2px 4px rgba(0,0,0,0.3), inset 0 2px 4px rgba(255,255,255,0.6)',
+                    cursor: 'pointer',
+                    zIndex: 10,
+                    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                    border: '1px solid rgba(0,0,0,0.2)'
+                  }}
+                />
+              );
+            })
+          )}
+        </div>
       </div>
     </div>
   );

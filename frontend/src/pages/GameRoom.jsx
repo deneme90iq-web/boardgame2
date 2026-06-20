@@ -102,6 +102,7 @@ export default function GameRoom({ user }) {
   };
 
   const gameType = room ? room.gameType : 'ludo';
+  const playerColor = room ? room.players.find(p => p.id === user.id)?.color : null;
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: '20px', height: 'calc(100vh - 120px)' }}>
@@ -117,6 +118,7 @@ export default function GameRoom({ user }) {
             </button>
             <h2 style={{ margin: 0 }}>Oda: {room ? room.name : roomId}</h2>
           </div>
+        </div>
         <div style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', background: 'rgba(0,0,0,0.2)', overflow: 'auto', flexDirection: 'column' }}>
           {room && (
             <div style={{ padding: '10px', color: 'var(--text-secondary)' }}>
