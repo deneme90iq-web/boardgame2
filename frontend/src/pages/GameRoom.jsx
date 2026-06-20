@@ -14,7 +14,8 @@ export default function GameRoom({ user }) {
   const [socket, setSocket] = useState(null);
 
   useEffect(() => {
-    const newSocket = io('http://localhost:5000');
+    const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
+    const newSocket = io(backendUrl);
     setSocket(newSocket);
 
     newSocket.emit('join_room', { roomId, user });
