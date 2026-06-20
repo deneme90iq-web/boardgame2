@@ -41,9 +41,30 @@ export default function Lobby({ user }) {
 
   return (
     <div className="glass-panel" style={{ padding: '30px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px', flexWrap: 'wrap', gap: '20px' }}>
         <h2>Oyun Lobisi</h2>
-        <div style={{ display: 'flex', gap: '10px' }}>
+        
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+          <div style={{ display: 'flex', background: 'rgba(0,0,0,0.2)', borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--glass-border)' }}>
+            <input 
+              type="text" 
+              placeholder="Oda Kodu" 
+              id="roomCodeInput"
+              style={{ background: 'transparent', border: 'none', padding: '8px 15px', color: 'white', width: '120px' }}
+            />
+            <button 
+              onClick={() => {
+                const code = document.getElementById('roomCodeInput').value.trim();
+                if (code) handleJoinRoom(code);
+              }}
+              style={{ borderRadius: 0, padding: '8px 15px', background: 'var(--accent-secondary)' }}
+            >
+              Katıl
+            </button>
+          </div>
+          
+          <span style={{ color: 'var(--text-secondary)', margin: '0 10px' }}>veya</span>
+
           <button onClick={() => handleCreateRoom('ludo')} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Plus size={18} /> Kızma Birader Kur
           </button>
@@ -90,7 +111,7 @@ export default function Lobby({ user }) {
               </button>
             )}
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '15px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '5px' }}>
               <h3 style={{ fontSize: '18px', margin: 0 }}>{room.name}</h3>
               <span style={{ 
                 background: room.gameType === 'ludo' ? 'rgba(99, 102, 241, 0.2)' : 'rgba(16, 185, 129, 0.2)', 
@@ -102,6 +123,10 @@ export default function Lobby({ user }) {
               }}>
                 {room.gameType === 'ludo' ? 'Kızma Birader' : 'Tombala'}
               </span>
+            </div>
+            
+            <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '15px' }}>
+              Oda Kodu: <strong style={{ color: 'white', letterSpacing: '1px' }}>{room.id}</strong>
             </div>
             
             <div style={{ display: 'flex', alignItems: 'center', color: 'var(--text-secondary)', marginBottom: '20px', fontSize: '14px' }}>
